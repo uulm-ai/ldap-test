@@ -16,7 +16,8 @@ object Main {
                   n: Int = 100,
                   startsPerSec: Double = 3,
                   meanDuration: Double = 32,
-                  sdDuration: Double = 2)
+                  sdDuration: Double = 2,
+                  truncate: Double = 3)
 
   val parser = new scopt.OptionParser[Conf]("ldap-test"){
     head("ldap-test","1.0")
@@ -27,12 +28,15 @@ object Main {
     opt[Double]('f',"start-freq")
       .action{case (x,c) => c.copy(startsPerSec = x)}
       .text("average number of requests to start per second (determines runtime, number of parallel connections)")
-    opt[Double]('d',"mean-duration")
+    opt[Double]('m',"mean-duration")
       .action{case (x,c) => c.copy(meanDuration = x)}
       .text("mean of normal distribution used to sample connection durations; default 32")
     opt[Double]('s',"sd-duration")
       .action{ case (x,c) => c.copy(sdDuration = x)}
       .text("standard deviation of normal distribution used to sample connection durations; default 2")
+    opt[Double]('t',"truncate")
+      .action{case (x,c) => c.copy(truncate = x)}
+      .text("truncate normal distribution at sd times this value; default 3")
     arg[String]("host")
       .action{case (x,c) => c.copy(host = x)}
       .text("host name to connect to")
@@ -69,13 +73,20 @@ object Main {
 
       val r = new Random()
       def genDur(n: Int): Seq[Duration] =
-        Iterator.continually(((r.nextGaussian() * c.sdDuration + c.meanDuration) * 1000).toLong).filter(_ > 0).map(Duration(_, "ms")).take(n).toIndexedSeq
+        Iterator.continually(r.nextGaussian() * c.sdDuration + c.meanDuration)
+          .filter(d => d > 0 && math.abs(c.meanDuration - d) < c.sdDuration * c.truncate)
+          .map(d => Duration((d * 1000).toLong, "ms")).take(n).toIndexedSeq
 
       val startDelay: Seq[FiniteDuration] = Seq.fill(c.n)(Duration((r.nextDouble() * (c.n / c.startsPerSec) * 1000).toLong, "ms"))
       val plan: Seq[(Duration, Duration)] = startDelay zip genDur(c.n)
+
+      System.err.println("running test...")
+
       val result: List[(Date, Date, Boolean)] = Observable.from(plan).flatMap { case (delay, dur) =>
         Observable.timer(delay).flatMap(_ => test(c.host, c.basedn, dur))
       }.toBlocking.toList
+
+      System.err.println("done...")
 
       println("time.start\ttime.end\tduration\tsuccess")
       println(result.map(prettyResult).mkString("\n"))
