@@ -44,8 +44,10 @@ object Main {
 
     def testRequest(): Boolean = {
       Try {
+        //the idea is that the following request fails with an exception,
+        //if the connection has been closed or interrupted
         val res: EntryCursor = conn.search("", "(uid=tgeier)", SearchScope.SUBTREE)
-        res.iterator().hasNext //we need to use the request, otherwise it will be discarded
+        res.iterator().hasNext //we need to use the request, otherwise it will be discarded by the library
         res.close()
       }.isSuccess
     }
